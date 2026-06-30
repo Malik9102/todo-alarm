@@ -1,49 +1,51 @@
 import { useState, useEffect, useRef } from 'react'
 import './App.css'
+import { supabase } from './supabase'
 
 function App() {
   const [todos, setTodos] = useState([])
   const [text, setText] = useState('')
   const [dueDate, setDueDate] = useState('')
-  const addTodo = (e) => {
-    e.preventDefault()
-    if (!text.trim() || !dueDate) return
 
-    const newTodo = {
-      id: Date.now(),
-      text: text.trim(),
-      dueDate: dueDate,
-      done: false,
-      alarmFired: false
-    }
-
-    setTodos([...todos, newTodo])
-    setText('')
-    setDueDate('')
-  }
-  const toggleDone = (id) => {
-    setTodos((currentTodos) =>
-      currentTodos.map((todo) =>
-        todo.id === id ? { ...todo, done: !todo.done } : todo
-      )
-    )
-  }
   useEffect(() => {
-    // Ask permission to show browser notifications, once on load
+    fetchTodos()
+  }, [])
+
+  const fetchTodos = async () => {
+    const { data, error } = await supabase
+      .from('todos')
+      .select('*')
+      .order('due_date', { ascending: true })
+
+    if (error) {
+      console.error('Error fetching todos:', error)
+    } else {
+      setTodos(data)
+    }
+  }
+
+  useEffect(() => {
     if (Notification.permission === 'default') {
       Notification.requestPermission()
     }
   }, [])
 
   useEffect(() => {
-    const interval = setInterval(() => {
+    const interval = setInterval(async () => {
       const now = new Date()
 
       setTodos((currentTodos) =>
         currentTodos.map((todo) => {
-          if (!todo.done && !todo.alarmFired && new Date(todo.dueDate) <= now) {
+          if (!todo.done && !todo.alarm_fired && new Date(todo.due_date) <= now) {
             triggerAlarm(todo)
-            return { ...todo, alarmFired: true }
+            supabase
+              .from('todos')
+              .update({ alarm_fired: true })
+              .eq('id', todo.id)
+              .then(({ error }) => {
+                if (error) console.error('Error updating alarm_fired:', error)
+              })
+            return { ...todo, alarm_fired: true }
           }
           return todo
         })
@@ -54,17 +56,68 @@ function App() {
   }, [])
 
   const triggerAlarm = (todo) => {
-    // Sound
     const audio = new Audio(
       'https://actions.google.com/sounds/v1/alarms/beep_short.ogg'
     )
     audio.play()
 
-    // Browser notification
     if (Notification.permission === 'granted') {
       new Notification('Task due!', { body: todo.text })
     } else {
       alert(`Task due: ${todo.text}`)
+    }
+  }
+  const deleteTodo = async (id) => {
+    const { error } = await supabase
+      .from('todos')
+      .delete()
+      .eq('id', id)
+
+    if (error) {
+      console.error('Error deleting todo:', error)
+    } else {
+      setTodos(todos.filter(t => t.id !== id))
+    }
+  }
+
+  const addTodo = async (e) => {
+    e.preventDefault()
+    if (!text.trim() || !dueDate) return
+
+    const newTodo = {
+      text: text.trim(),
+      due_date: new Date(dueDate).toISOString(),
+      done: false,
+      alarm_fired: false
+    }
+
+    const { data, error } = await supabase
+      .from('todos')
+      .insert([newTodo])
+      .select()
+
+    if (error) {
+      console.error('Error adding todo:', error)
+    } else {
+      setTodos([...todos, data[0]])
+      setText('')
+      setDueDate('')
+    }
+  }
+
+  const toggleDone = async (id) => {
+    const todo = todos.find(t => t.id === id)
+    const { error } = await supabase
+      .from('todos')
+      .update({ done: !todo.done })
+      .eq('id', id)
+
+    if (error) {
+      console.error('Error updating todo:', error)
+    } else {
+      setTodos(todos.map(t =>
+        t.id === id ? { ...t, done: !t.done } : t
+      ))
     }
   }
 
@@ -86,15 +139,14 @@ function App() {
         />
         <button type="submit">Add</button>
       </form>
+
       <ul>
         {todos.map((todo) => {
-          const isOverdue = !todo.done && new Date(todo.dueDate) <= new Date()
+          const isOverdue = !todo.done && new Date(todo.due_date) <= new Date()
           return (
             <li
               key={todo.id}
-              className={
-                todo.done ? 'done' : isOverdue ? 'overdue' : ''
-              }
+              className={todo.done ? 'done' : isOverdue ? 'overdue' : ''}
             >
               <input
                 type="checkbox"
@@ -102,7 +154,8 @@ function App() {
                 onChange={() => toggleDone(todo.id)}
               />
               <span>{todo.text}</span>
-              <span> — due: {new Date(todo.dueDate).toLocaleString()}</span>
+              <span> — due: {new Date(todo.due_date).toLocaleString()}</span>
+              <button onClick={() => deleteTodo(todo.id)}>Delete</button>
             </li>
           )
         })}
@@ -110,4 +163,5 @@ function App() {
     </div>
   )
 }
+
 export default App
