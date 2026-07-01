@@ -1,20 +1,34 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect } from 'react'
 import './App.css'
 import { supabase } from './supabase'
+import Auth from './Auth'
 
 function App() {
   const [todos, setTodos] = useState([])
   const [text, setText] = useState('')
   const [dueDate, setDueDate] = useState('')
+  const [currentUser, setCurrentUser] = useState(null)
 
+  // Check localStorage for existing session on page load
   useEffect(() => {
-    fetchTodos()
+    const savedUser = localStorage.getItem('user')
+    if (savedUser) {
+      setCurrentUser(JSON.parse(savedUser))
+    }
   }, [])
+
+  // Fetch todos whenever currentUser changes
+  useEffect(() => {
+    if (currentUser) {
+      fetchTodos()
+    }
+  }, [currentUser])
 
   const fetchTodos = async () => {
     const { data, error } = await supabase
       .from('todos')
       .select('*')
+      .eq('user_id', currentUser.id)
       .order('due_date', { ascending: true })
 
     if (error) {
@@ -67,18 +81,6 @@ function App() {
       alert(`Task due: ${todo.text}`)
     }
   }
-  const deleteTodo = async (id) => {
-    const { error } = await supabase
-      .from('todos')
-      .delete()
-      .eq('id', id)
-
-    if (error) {
-      console.error('Error deleting todo:', error)
-    } else {
-      setTodos(todos.filter(t => t.id !== id))
-    }
-  }
 
   const addTodo = async (e) => {
     e.preventDefault()
@@ -88,7 +90,8 @@ function App() {
       text: text.trim(),
       due_date: new Date(dueDate).toISOString(),
       done: false,
-      alarm_fired: false
+      alarm_fired: false,
+      user_id: currentUser.id
     }
 
     const { data, error } = await supabase
@@ -121,9 +124,43 @@ function App() {
     }
   }
 
+  const deleteTodo = async (id) => {
+    const { error } = await supabase
+      .from('todos')
+      .delete()
+      .eq('id', id)
+
+    if (error) {
+      console.error('Error deleting todo:', error)
+    } else {
+      setTodos(todos.filter(t => t.id !== id))
+    }
+  }
+
+  const handleLogin = (user) => {
+    localStorage.setItem('user', JSON.stringify(user))
+    setCurrentUser(user)
+  }
+
+  const handleLogout = () => {
+    localStorage.removeItem('user')
+    setCurrentUser(null)
+    setTodos([])
+  }
+
+  if (!currentUser) {
+    return <Auth onLogin={handleLogin} />
+  }
+
   return (
     <div>
-      <h1>Todo Alarm</h1>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <h1>Todo Alarm</h1>
+        <div>
+          <span>Hi, {currentUser.username}</span>
+          <button onClick={handleLogout} style={{ marginLeft: '10px' }}>Logout</button>
+        </div>
+      </div>
 
       <form onSubmit={addTodo}>
         <input
